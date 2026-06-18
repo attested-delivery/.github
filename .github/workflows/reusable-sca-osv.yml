@@ -52,17 +52,52 @@ permissions:
   contents: read
 
 jobs:
-  # OSV-Scanner ships an official reusable workflow that scans, generates SARIF,
-  # and uploads it to code scanning. Pinned to the repo's release SHA.
+  # OSV-Scanner run INLINE via its actions (osv-scanner-action + osv-reporter-action)
+  # rather than Google's nested reusable workflow. A nested external reusable
+  # workflow cannot be permitted by an org's "Allow select actions" policy, but
+  # the actions allow-list like any third-party action (e.g. aquasecurity/trivy).
+  # This faithfully replicates osv-scanner-reusable.yml@v2.3.8: scan -> JSON ->
+  # SARIF -> upload artifact "OSV Scanner SARIF file" -> code scanning.
   osv-scan:
     name: osv-scanner
+    runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: read
       security-events: write
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
-    with:
-      scan-args: ${{ inputs.scan-args }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Run OSV-Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        continue-on-error: true
+        with:
+          scan-args: |-
+            --output=results.json
+            --format=json
+            ${{ inputs.scan-args }}
+      - name: Generate SARIF report
+        uses: google/osv-scanner-action/osv-reporter-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        with:
+          scan-args: |-
+            --output=results.sarif
+            --new=results.json
+            --gh-annotations=false
+            --fail-on-vuln=true
+      - name: Upload SARIF artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: OSV Scanner SARIF file
+          path: results.sarif
+          retention-days: 5
+      - name: Upload to code scanning
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4.34.1
+        with:
+          sarif_file: results.sarif
 
   dependency-review:
     name: dependency-review
