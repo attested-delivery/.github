@@ -1,55 +1,55 @@
 # attested-delivery — org constitution runbook
 
-Materializes the org `attested-delivery` as a secure, attested-workflow
-reference org. All content is sanitized of non-`attested-delivery` names.
+How the `attested-delivery` org was constituted as a secure, attested-workflow
+reference org, and how to operate it. All content is sanitized of non-org names.
 
-## What is built (in this working dir, pushed where noted)
+## Repositories
 
-| Path | Purpose | Pushed to |
+| Repo | Purpose | Notes |
 | --- | --- | --- |
-| `repos/.github/` | Org community-health defaults + reusable attested quality-gate workflows | `attested-delivery/.github` (public, template) |
-| `repos/attested-pipeline-template/` | Language-agnostic attested release pipeline template | `attested-delivery/attested-pipeline-template` (public, template) |
-| `repos/rust-template/` | Sanitized Rust attested template | `attested-delivery/rust-template` (public, template) |
-| `docs-site/` | Astro Starlight docs site (overview, 10 concepts, 5 specs, 8 ADRs) | `attested-delivery/docs` (public) — Pages: https://attested-delivery.github.io/docs/ |
-| `app/manifest.json`, `app/create-app.html` | GitHub App identity (manifest flow) | n/a — you create the App |
-| `org/harden.sh` | Org security hardening (run after scope refresh) | n/a — run locally |
+| `.github` | Org community-health defaults + reusable attested quality-gate workflows + signer workflows | template; reusables: sca-osv, trivy, scorecard, attest-scan, sign-and-attest, verify-attestation, pin-check |
+| `attested-pipeline-template` | Language-agnostic attested release pipeline | template; release `v0.1.0` published + attested |
+| `rust-template` | Rust attested template (5-platform build, SBOM, gates) | template; release `v0.1.0` published + attested |
+| `docs` | Astro Starlight docs site | live at https://attested-delivery.github.io/docs/ |
 
-## TWO actions only an org owner can do (the remaining blockers)
+## Automation identity — GitHub App `attested-delivery-ci`
 
-### A. Grant `admin:org` scope (unblocks org hardening, check #2)
-The active `gh` token (`zircote`) lacks `admin:org`, so org policy/Actions
-writes return 403. Grant it once in this session:
+Created + installed org-wide (all repos). The private key lives outside any repo
+(referenced by name only). The App is the org automation identity (repo
+provisioning, cross-repo dispatch). It is **not** used for artifact signing or
+GHCR — in-workflow signing uses the run's own ephemeral `GITHUB_TOKEN` + OIDC
+`id-token`, which is what SLSA L3 requires.
+
+Re-create from `app/manifest.json` via the manifest flow (`app/create-app.html`)
+if ever needed; exchange the `?code=` with
+`gh api -X POST /app-manifests/<code>/conversions`.
+
+## Org security (hardened)
+
+- 2FA enforcement **required** (UI-only setting — `two_factor_requirement_enabled`
+  is read-only via REST).
+- `default_repository_permission: read`; members cannot create public/private
+  repos or delete repos; web commit sign-off required.
+- Actions policy: "Allow select actions and reusable workflows" with **require
+  SHA-pinning ON** (foundational). The third-party allow-list is documented in
+  `.github/README.md`. Per-repo `pin-check` jobs re-enforce SHA-pinning.
+
+`org/harden.sh` applies the API-settable subset (requires `admin:org`); the 2FA
+toggle and the Actions allow-list are UI-only.
+
+## Verifying a release
 
 ```
-! gh auth refresh -h github.com -s admin:org
+gh release download <tag> --repo attested-delivery/<repo> --pattern '<artifact>'
+gh attestation verify <artifact> --repo attested-delivery/<repo>
+gh attestation verify <artifact> --repo attested-delivery/<repo> --predicate-type https://cyclonedx.org/bom
 ```
 
-Then I (or you) run `bash org/harden.sh`.
+Both `attested-pipeline-template` and `rust-template` `v0.1.0` releases verify
+(SLSA provenance + CycloneDX SBOM) independently from a workstation.
 
-### B. Create the GitHub App (the automation identity, check #1)
-GitHub has no API to create an App from scratch with a PAT — use the manifest flow:
+## Status
 
-1. `open app/create-app.html` (signed in as an attested-delivery owner).
-2. Click "Create attested-delivery-ci App" → confirm on GitHub.
-3. Copy the `?code=` from the redirect URL, then:
-   `gh api -X POST /app-manifests/<code>/conversions --jq '{id, slug, html_url}'`
-4. Save the returned `pem` OUTSIDE any repo (never commit it).
-5. Open `html_url` → Install → "All repositories".
-
-The App is the org automation identity (repo provisioning, agentic workflows,
-cross-repo dispatch). It is **not** used for artifact signing or GHCR: in-workflow
-signing uses the run's own ephemeral `GITHUB_TOKEN` + OIDC `id-token`, which is
-what SLSA L3 requires.
-
-## Goal check status
-
-1. **App identity** — App half: manifest ready, pending your creation (B).
-   No-PAT half: DONE — zero `secrets.GITHUB_PAT` across all workflows.
-2. **Org hardening** — script ready (`org/harden.sh`), pending scope refresh (A).
-   (2FA enforcement is a UI-only setting — see the script's note.)
-3. **Templates** — DONE: `.github`, `attested-pipeline-template`, `rust-template`
-   created public with `isTemplate: true`.
-4. **Attested pipelines** — workflows SHA-pinned, pin-check present, provenance +
-   SBOM attest + fail-closed verify configured; `actionlint` exit 0. Live
-   `gh attestation verify` exercised via release dry-run.
-5. **Docs site** — DONE: `pnpm build` exits 0, 26 pages, sitemap generated.
+All five constitution objectives are complete: App identity installed, org
+hardened, three templates published with `isTemplate: true`, attested release
+pipelines producing independently-verifiable releases, and the docs site live.
