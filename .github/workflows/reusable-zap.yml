@@ -12,9 +12,15 @@
 # `allow_issue_writing: false` keeps this workflow to contents: read — it does
 # not open GitHub issues.
 #
+# The JSON report is uploaded as a downloadable artifact and exposed via the
+# `report-artifact` / `report-filename` outputs, so the attestation seam
+# (reusable-attest-scan.yml) can sign the DAST verdict bound to a release
+# subject under predicate-type
+# https://attested-delivery.github.io/attestations/dast/v1.
+#
 # Usage:
 #   jobs:
-#     dast:
+#     gate-dast:
 #       permissions:
 #         contents: read
 #       uses: attested-delivery/.github/.github/workflows/reusable-zap.yml@<sha>
@@ -40,6 +46,13 @@ on:
         required: false
         type: string
         default: '-a'
+    outputs:
+      report-artifact:
+        description: 'Artifact name holding the DAST evidence (attestation seam)'
+        value: dast-report
+      report-filename:
+        description: 'JSON report filename within the artifact'
+        value: report_json.json
 
 permissions:
   contents: read
@@ -58,3 +71,14 @@ jobs:
           fail_action: ${{ inputs.fail-action }}
           cmd_options: ${{ inputs.cmd-options }}
           allow_issue_writing: false
+
+      # Expose the ZAP JSON report as evidence for the attestation seam. The
+      # action writes report_json.json to the workspace; upload it even on a
+      # failing scan so the recorded verdict is always available to sign.
+      - name: Upload DAST report artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dast-report
+          path: report_json.json
+          if-no-files-found: error
