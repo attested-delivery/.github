@@ -87,7 +87,7 @@ gh attestation verify <binary> --repo attested-delivery/<repo>
 
 Repositories wired to the attested quality gates additionally record a signed,
 digest-bound attestation for each CI gate — SAST, SCA, container/IaC/license scan,
-supply-chain posture, and vulnerability disposition.
+DAST, supply-chain posture, and vulnerability disposition.
 
 ```sh
 SUBJECT=oci://ghcr.io/attested-delivery/<repo>@${DIGEST}
@@ -96,6 +96,10 @@ SEAM=attested-delivery/.github/.github/workflows/reusable-attest-scan.yml
 # Seam-signed gate (SAST shown; swap predicate-type for other SARIF gates)
 gh attestation verify "$SUBJECT" --owner attested-delivery --signer-workflow "$SEAM" \
   --predicate-type https://attested-delivery.github.io/attestations/sast/v1
+
+# DAST (ZAP) verdict — seam-signed, same signer workflow
+gh attestation verify "$SUBJECT" --owner attested-delivery --signer-workflow "$SEAM" \
+  --predicate-type https://attested-delivery.github.io/attestations/dast/v1
 
 # Vulnerability disposition (OpenVEX — self-signed by reusable-vex.yml)
 gh attestation verify "$SUBJECT" --owner attested-delivery \
