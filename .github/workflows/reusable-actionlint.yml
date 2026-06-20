@@ -68,7 +68,10 @@ jobs:
           tar xzf actionlint.tar.gz -C "${install_dir}" actionlint
           chmod +x "${install_dir}/actionlint"
           echo "${install_dir}" >> "${GITHUB_PATH}"
-          actionlint --version
+          # Call by full path: $GITHUB_PATH only affects *subsequent* steps, so
+          # `actionlint` is not yet on PATH within this step (a bare call exits
+          # 127). The next step ("Run actionlint") resolves it via $GITHUB_PATH.
+          "${install_dir}/actionlint" --version
       - name: Run actionlint
         env:
           FILES: ${{ inputs.files }}
