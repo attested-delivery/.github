@@ -53,17 +53,21 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - name: Install actionlint (pinned + checksum-verified, fail-closed)
         env:
           VERSION: ${{ inputs.version }}
           SHA256: ${{ inputs.sha256 }}
         run: |
           set -euo pipefail
+          install_dir="${RUNNER_TEMP}/actionlint"
+          mkdir -p "${install_dir}"
           curl -sSfL -o actionlint.tar.gz \
             "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
           echo "${SHA256}  actionlint.tar.gz" | sha256sum -c -
-          tar xzf actionlint.tar.gz -C /usr/local/bin actionlint
+          tar xzf actionlint.tar.gz -C "${install_dir}" actionlint
+          chmod +x "${install_dir}/actionlint"
+          echo "${install_dir}" >> "${GITHUB_PATH}"
           actionlint --version
       - name: Run actionlint
         env:
