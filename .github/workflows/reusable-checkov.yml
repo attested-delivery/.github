@@ -69,15 +69,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # Install Checkov from PyPI at an exact pinned version using the runner's
-      # preinstalled Python — no setup-python or third-party action needed.
+      # Install Checkov from PyPI at an exact pinned version into an isolated
+      # virtualenv — no setup-python or third-party action needed. The venv keeps
+      # resolution off the runner's preinstalled site-packages, so the install is
+      # reproducible from the pinned version alone. (Top-level pin only; full
+      # transitive hash-locking is a documented follow-up — see PR discussion.)
       - name: Install Checkov (pinned)
         env:
           CHECKOV_VERSION: ${{ inputs.checkov-version }}
         run: |
           set -euo pipefail
-          python3 -m pip install --user --no-warn-script-location "checkov==${CHECKOV_VERSION}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          python3 -m venv "${RUNNER_TEMP}/checkov-venv"
+          "${RUNNER_TEMP}/checkov-venv/bin/pip" install --no-cache-dir --disable-pip-version-check \
+            "checkov==${CHECKOV_VERSION}"
+          echo "${RUNNER_TEMP}/checkov-venv/bin" >> "$GITHUB_PATH"
 
       - name: Checkov IaC policy scan (soft-fail)
         env:
@@ -94,8 +99,15 @@ jobs:
             --output-file-path checkov-out \
             --soft-fail \
             --quiet
-          mv checkov-out/results_sarif.sarif checkov-iac-policy.sarif
-          echo "Wrote checkov-iac-policy.sarif"
+          # Locate the SARIF file by extension rather than assuming a fixed
+          # filename (Checkov's output filename has varied across versions).
+          sarif="$(find checkov-out -maxdepth 1 -name '*.sarif' | head -n1)"
+          if [ -z "${sarif}" ]; then
+            echo "::error::Checkov produced no SARIF file in checkov-out/"
+            exit 1
+          fi
+          mv "${sarif}" checkov-iac-policy.sarif
+          echo "Wrote checkov-iac-policy.sarif (from ${sarif})"
 
       - name: Upload Checkov SARIF
         if: always()
