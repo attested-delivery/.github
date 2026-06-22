@@ -61,7 +61,7 @@ predicate, allow-list). Roles in brief:
 | `reusable-zap.yml` | DAST (opt-in; needs a running target) |
 | `reusable-secrets.yml` | Secret scanning — Gitleaks (soft-fail) + TruffleHog (verified-only, hard-fail) |
 | `reusable-semgrep.yml` | SAST (source) — Semgrep, complements CodeQL |
-| `reusable-shellcheck.yml` | SAST (shell hooks) — Differential ShellCheck (needs `redhat-plumbers-in-action/*` allow-list) |
+| `reusable-shellcheck.yml` | SAST (shell hooks) — Differential ShellCheck (needs `redhat-plumbers-in-action/differential-shellcheck@*` allow-list) |
 | `reusable-manifest-review.yml` | Marketplace/plugin manifest integrity (external sources SHA-pinned, required fields) |
 
 Caller permission sets (job-level, for the `uses:` jobs):

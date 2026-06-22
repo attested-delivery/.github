@@ -91,7 +91,7 @@ entry point — the build stays in the caller; the central reusables sign and ve
       attestations: write
       packages: write
       contents: read
-    uses: <org>/.github/.github/workflows/sign-and-attest.yml@<full-sha>
+    uses: <org>/.github/.github/workflows/sign-and-attest.yml@<full-sha> # vX.Y.Z
     with:
       image-name: ghcr.io/<org>/<repo>
       image-digest: ${{ needs.build.outputs.image-digest }}
@@ -103,7 +103,7 @@ entry point — the build stays in the caller; the central reusables sign and ve
       contents: read
       packages: read
       attestations: read
-    uses: <org>/.github/.github/workflows/verify-attestation.yml@<full-sha>
+    uses: <org>/.github/.github/workflows/verify-attestation.yml@<full-sha> # vX.Y.Z
     with:
       image-ref: ghcr.io/<org>/<repo>@${{ needs.build.outputs.image-digest }}
       attestation-repo: <org>/<repo>

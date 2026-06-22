@@ -131,7 +131,7 @@ in your rebase.
 only a tag is known; `docker manifest inspect` requires a local docker.
 **Fix:** the GHCR package-versions API:
 ```sh
-gh api 'orgs/<org>/packages/container/<name>/versions?per_page=20' \
+gh api 'orgs/<org>/packages/container/<name>/versions?per_page=100' \
   --jq '[.[] | select((.metadata.container.tags // []) | index("<tag>"))][0].name'
 ```
 

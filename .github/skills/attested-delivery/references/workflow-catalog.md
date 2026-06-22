@@ -103,7 +103,7 @@ self-verifies. Image-only; not for static artifacts.
 - **Predicates (self-signed):** `https://slsa.dev/provenance/v1` (Build L3, via
   `actions/attest-build-provenance`); CycloneDX SBOM and
   `https://in-toto.io/attestation/vulns/v0.1` via inline `cosign attest`.
-- **Allow-list:** `sigstore/cosign-installer`, `docker/login-action`,
+- **Allow-list:** `sigstore/cosign-installer@*`, `docker/login-action`,
   `actions/attest-build-provenance` (GitHub-created), `anchore/sbom-action`,
   `anchore/scan-action`.
 
@@ -127,7 +127,7 @@ to `sign-and-attest.yml`. Reused by promotion and callable before deploy. Image-
 - **Predicate:** none (consumes attestations from `sign-and-attest.yml`).
 - **Allow-list:** `aws-actions/configure-aws-credentials`,
   `aws-actions/amazon-ecr-login` (only when `aws-role-arn` is set),
-  `docker/login-action`, `sigstore/cosign-installer`.
+  `docker/login-action`, `sigstore/cosign-installer@*`.
 
 ---
 
@@ -290,7 +290,7 @@ re-exposed for the seam.
 - **Outputs:** `sarif-artifact` = `sast-hooks-sarif`; `sarif-filename` = `shellcheck.sarif`.
 - **Permissions:** job `sast-hooks` needs `contents: read`, `security-events: write`.
 - **Seam predicate:** `.../attestations/shellcheck/v1`.
-- **Allow-list:** **`redhat-plumbers-in-action/*`** (the differential-shellcheck action
+- **Allow-list:** **`redhat-plumbers-in-action/differential-shellcheck@*`** (the action
   is third-party — add it before a caller runs this gate).
 
 ### `${CLAUDE_PLUGIN_ROOT}/workflows/reusable-manifest-review.yml` — manifest integrity
@@ -317,4 +317,4 @@ package) with Sigstore cosign keyless signing, and verify the bundle back in-run
 - **Permissions:** job `cosign-sign` needs `id-token: write`, `contents: read`.
 - **Predicate:** none — this is a blob signer, not a SARIF gate. The Fulcio cert SAN is
   this signer workflow; verify with `cosign verify-blob --certificate-identity-regexp`.
-- **Allow-list:** **`sigstore/cosign-installer`**.
+- **Allow-list:** **`sigstore/cosign-installer@*`**.

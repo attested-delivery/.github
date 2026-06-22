@@ -64,7 +64,7 @@ commit SHA: `uses: attested-delivery/.github/.github/workflows/<file>@<sha> # vX
 | `reusable-zap.yml` | DAST (opt-in; needs a running app) |
 | `reusable-secrets.yml` | Secret scanning — Gitleaks (soft-fail) + TruffleHog (verified-only, hard-fail) |
 | `reusable-semgrep.yml` | SAST (source) — Semgrep, complements CodeQL |
-| `reusable-shellcheck.yml` | SAST (shell hooks) — Differential ShellCheck (needs `redhat-plumbers-in-action/*` allow-list) |
+| `reusable-shellcheck.yml` | SAST (shell hooks) — Differential ShellCheck (needs `redhat-plumbers-in-action/differential-shellcheck@*` allow-list) |
 | `reusable-manifest-review.yml` | Marketplace/plugin manifest integrity (external sources SHA-pinned, required fields) |
 | `reusable-attest-scan.yml` | **The attestation seam** — sign any evidence file into a digest-bound in-toto attestation |
 | `reusable-verify-gates.yml` | Fail-closed `gh attestation verify` of gate attestations (put in a deploy job's `needs:`) |

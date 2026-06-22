@@ -38,11 +38,12 @@ agent work.)
 ## Install
 
 ```bash
-# from a local checkout
-claude --plugin-dir /path/to/.github/.github
+# from a local checkout of this repo; the plugin root is the `.github/`
+# directory inside the checkout (replace <repo> with your clone path)
+claude --plugin-dir <repo>/.github
 
 # or validate the plugin structure
-claude plugin validate /path/to/.github/.github
+claude plugin validate <repo>/.github
 ```
 
 Once enabled, the `attested-delivery` skill triggers on phrases like "onboard to

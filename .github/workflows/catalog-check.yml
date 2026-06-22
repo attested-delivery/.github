@@ -41,7 +41,7 @@ jobs:
           for f in .github/workflows/*.yml; do
             grep -qE '^[[:space:]]*workflow_call:' "$f" || continue
             base="$(basename "$f")"
-            if ! grep -q "workflows/${base}" "$catalog"; then
+            if ! grep -qF "workflows/${base}" "$catalog"; then
               echo "::error file=${catalog}::undocumented reusable: ${base} has no catalog entry"
               rc=1
             fi
