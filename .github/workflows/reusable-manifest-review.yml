@@ -91,7 +91,8 @@ jobs:
                   full = os.path.join(dirpath, fn)
                   if fn == "marketplace.json" and ".claude-plugin" in dirpath:
                       try:
-                          mp = json.load(open(full))
+                          with open(full, encoding="utf-8") as fh:
+                              mp = json.load(fh)
                       except Exception as e:
                           add("MR001", "error", "marketplace.json is not valid JSON: %s" % e, rel(full)); continue
                       if not mp.get("name"):
@@ -114,7 +115,8 @@ jobs:
                                       rel(full))
                   elif fn == "plugin.json" and ".claude-plugin" in dirpath:
                       try:
-                          pl = json.load(open(full))
+                          with open(full, encoding="utf-8") as fh:
+                              pl = json.load(fh)
                       except Exception as e:
                           add("MR007", "error", "plugin.json is not valid JSON: %s" % e, rel(full)); continue
                       for req in ("name", "description"):
