@@ -25,6 +25,15 @@ in this org, `<org>` = `attested-delivery`; in Mode B it is the new org's own co
 never cross-org), and `<org>/<repo>` is the consumer being onboarded. Pin every
 `uses:` to the central repo's full 40-char SHA with a trailing `# vX.Y.Z`.
 
+**These snippets show the wiring _shape_ — the job graph and the seam edge — not an
+authoritative input list.** The exact `workflow_call` contract for each reusable
+(input names, defaults, outputs, required permissions) lives in one place:
+`references/workflow-catalog.md`. Read it for the inputs; treat the `with:` blocks
+below as illustrative. For a **complete, CI-validated runnable caller** to copy from,
+see the Copier template `attested-delivery/attested-iac-template` — a real repo whose
+pins `actionlint`/`pin-check`/Dependabot keep current, so it never drifts the way a
+pasted snippet does.
+
 ## Caller recipe A — wiring the quality gates through the seam
 
 Each SARIF gate runs, uploads its evidence artifact, and exposes
@@ -59,22 +68,14 @@ jobs:
       predicate-filename: ${{ needs.sast.outputs.sarif-filename }}
 ```
 
-Then fail-closed at deploy with `reusable-verify-gates.yml` (one signer per call):
-
-```yaml
-  verify-gates:
-    needs: [build, sast-attest]
-    permissions:
-      contents: read
-      attestations: read
-      packages: read
-    uses: <org>/.github/.github/workflows/reusable-verify-gates.yml@<full-sha> # vX.Y.Z
-    with:
-      subject-ref: oci://ghcr.io/<org>/<repo>@${{ needs.build.outputs.image-digest }}
-      owner: <org>
-      signer-workflow: <org>/.github/.github/workflows/reusable-attest-scan.yml
-      predicate-types: https://attested-delivery.github.io/attestations/sast/v1
-```
+Then fail-closed at deploy: add a `verify-gates` job (`needs: [build, <gate>-attest]`,
+perms `contents: read` + `attestations: read` + `packages: read`) that calls
+`reusable-verify-gates.yml` with the deploy subject `oci://…@<digest>`, the producing
+`owner`, the **single** `signer-workflow` for that call (`reusable-attest-scan.yml`
+for seam-signed gates; `reusable-vex.yml` for OpenVEX — one signer per call), and the
+`predicate-types` to require. Inputs and the one-signer-per-call rule are specified in
+`references/workflow-catalog.md` → `reusable-verify-gates.yml`; a worked caller is in
+`attested-delivery/attested-iac-template`.
 
 A repo with **no container build yet** builds and pushes its image by digest in its
 own build job, then signs via recipe B. There is no single "build-and-attest"
