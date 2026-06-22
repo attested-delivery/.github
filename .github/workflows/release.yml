@@ -306,8 +306,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           SOURCE: ${{ needs.package.outputs.subject-name }}
           PROV_SIGNER: ${{ github.repository }}/.github/workflows/release.yml
-          SEAM: attested-delivery/.github/.github/workflows/reusable-attest-scan.yml
-        run: |
+          SEAM: ${{ github.repository }}/.github/workflows/reusable-attest-scan.yml
           set -euo pipefail
           shopt -s nullglob
           artifacts=(dist/*)
