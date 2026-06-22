@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Unit tests for the pure (IO-free) parts of the catalog-updater engine."""
+
+import json
+import unittest
+
+import catalog_update as cu
+
+# A fixture catalog: one local entry (must be untouched) + one external entry.
+FIXTURE = """\
+{
+  "name": "attested-delivery",
+  "owner": { "name": "attested-delivery" },
+  "plugins": [
+    {
+      "name": "attested-reference",
+      "source": "./plugins/attested-reference",
+      "keywords": ["reference", "attested", "example"]
+    },
+    {
+      "name": "acme-widgets",
+      "source": {
+        "source": "git-subdir",
+        "repo": "acme/widgets",
+        "subdir": "plugins/widgets",
+        "ref": "v1.2.3",
+        "sha": "1111111111111111111111111111111111111111"
+      },
+      "keywords": ["widgets"]
+    }
+  ]
+}
+"""
+
+NEW_SHA = "2222222222222222222222222222222222222222"
+
+
+class RepinText(unittest.TestCase):
+    def test_rewrites_sha_and_ref_only(self):
+        out = cu.repin_text(FIXTURE, "1111111111111111111111111111111111111111", NEW_SHA, "v2.0.0")
+        mp = json.loads(out)
+        src = mp["plugins"][1]["source"]
+        self.assertEqual(src["sha"], NEW_SHA)
+        self.assertEqual(src["ref"], "v2.0.0")
+
+    def test_local_entry_and_formatting_preserved(self):
+        out = cu.repin_text(FIXTURE, "1111111111111111111111111111111111111111", NEW_SHA, "v2.0.0")
+        # The local source line and the inline keywords array are byte-preserved.
+        self.assertIn('"source": "./plugins/attested-reference"', out)
+        self.assertIn('"keywords": ["reference", "attested", "example"]', out)
+        # Only the sha and ref tokens changed; everything else identical.
+        expected = FIXTURE.replace(
+            "1111111111111111111111111111111111111111", NEW_SHA
+        ).replace('"ref": "v1.2.3"', '"ref": "v2.0.0"')
+        self.assertEqual(out, expected)
+
+    def test_rejects_bad_new_sha(self):
+        with self.assertRaises(ValueError):
+            cu.repin_text(FIXTURE, "1111111111111111111111111111111111111111", "nope", "v2.0.0")
+
+    def test_rejects_missing_old_sha(self):
+        with self.assertRaises(ValueError):
+            cu.repin_text(FIXTURE, "9999999999999999999999999999999999999999", NEW_SHA, "v2.0.0")
+
+
+class ExternalEntries(unittest.TestCase):
+    def test_only_object_external_sources(self):
+        mp = json.loads(FIXTURE)
+        entries = cu.external_entries(mp)
+        self.assertEqual([i for i, _ in entries], [1])
+        self.assertEqual(entries[0][1]["name"], "acme-widgets")
+
+
+class ParsePredicates(unittest.TestCase):
+    def test_uri_only(self):
+        self.assertEqual(cu.parse_predicates("https://slsa.dev/provenance/v1"),
+                         [("https://slsa.dev/provenance/v1", None)])
+
+    def test_uri_with_signer_and_multiline(self):
+        spec = "https://slsa.dev/provenance/v1\nhttps://ex/sast/v1 owner/.github/.github/workflows/x.yml"
+        self.assertEqual(
+            cu.parse_predicates(spec),
+            [("https://slsa.dev/provenance/v1", None),
+             ("https://ex/sast/v1", "owner/.github/.github/workflows/x.yml")],
+        )
+
+    def test_empty_fails_closed(self):
+        with self.assertRaises(ValueError):
+            cu.parse_predicates("   ")
+
+
+class RenderBody(unittest.TestCase):
+    def test_contains_bump_and_attestations(self):
+        evidence = {
+            "ok": True,
+            "subject": "widgets-2.0.0.tgz",
+            "digest": "sha256:abc",
+            "checks": [{"predicate": "https://slsa.dev/provenance/v1",
+                        "signer": "repo:acme/widgets", "ok": True, "output": "Verified"}],
+        }
+        body = cu.render_pr_body(
+            "acme-widgets", "acme/widgets", "v1.2.3", "v2.0.0",
+            "1111111111111111111111111111111111111111", NEW_SHA,
+            {"html_url": "https://example/r", "published_at": "2026-06-22T00:00:00Z"},
+            evidence,
+        )
+        self.assertIn("acme-widgets", body)
+        self.assertIn("v1.2.3` → `v2.0.0", body)
+        self.assertIn("✅ verified", body)
+        self.assertIn("widgets-2.0.0.tgz", body)
+        self.assertIn("gh attestation verify", body)
+        # Repo-signed provenance: re-verify command must NOT add --signer-workflow.
+        self.assertNotIn("--signer-workflow", body)
+
+    def test_reverify_includes_signer_for_seam_signed(self):
+        evidence = {
+            "ok": True, "subject": "w.tgz", "digest": "sha256:abc",
+            "checks": [
+                {"predicate": "https://slsa.dev/provenance/v1",
+                 "signer": "repo:acme/widgets", "ok": True, "output": "ok"},
+                {"predicate": "https://ex/sast/v1",
+                 "signer": "owner/.github/.github/workflows/reusable-attest-scan.yml",
+                 "ok": True, "output": "ok"},
+            ],
+        }
+        body = cu.render_pr_body(
+            "acme-widgets", "acme/widgets", "v1", "v2",
+            "1111111111111111111111111111111111111111", NEW_SHA, {}, evidence,
+        )
+        # The seam-signed predicate's re-verify line carries its signer-workflow;
+        # the repo-signed one does not.
+        self.assertIn("--signer-workflow owner/.github/.github/workflows/reusable-attest-scan.yml", body)
+
+
+if __name__ == "__main__":
+    unittest.main()
