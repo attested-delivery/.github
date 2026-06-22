@@ -58,7 +58,8 @@ reaches them will **startup-fail** ("workflow file issue"):
 | `ossf/scorecard-action@*` | `reusable-scorecard` | posture |
 | `grafana/run-k6-action@*`, `grafana/setup-k6-action@*` | `reusable-k6` | load testing |
 | `zaproxy/action-full-scan@*` | `reusable-zap` | DAST |
-| `sigstore/cosign-installer@*` | `sign-and-attest` | container signing (SLSA L3) |
+| `redhat-plumbers-in-action/differential-shellcheck@*` | `reusable-shellcheck` | hook SAST → SARIF (plugin marketplace) |
+| `sigstore/cosign-installer@*` | `sign-and-attest`, `reusable-cosign-sign` | container signing (SLSA L3) + keyless blob/catalog signing |
 | `aws-actions/amazon-ecr-login@*`, `aws-actions/configure-aws-credentials@*` | `pipeline` deploy | ECR (only when `publish` is enabled) |
 | `anchore/scan-action@*` | image scan | grype |
 
