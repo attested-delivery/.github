@@ -62,6 +62,10 @@ reaches them will **startup-fail** ("workflow file issue"):
 | `aws-actions/amazon-ecr-login@*`, `aws-actions/configure-aws-credentials@*` | `pipeline` deploy | ECR (only when `publish` is enabled) |
 | `anchore/scan-action@*` | image scan | grype |
 
+> **Allow-list-free reusable:** `reusable-checkov.yml` (IaC policy gate) installs
+> Checkov via `pip` and uses only GitHub-created actions, so it references **no**
+> third-party action and needs **no** allow-list entry — callers run it as-is.
+
 Complete superset (every third-party action across all org workflows):
 
 ```
