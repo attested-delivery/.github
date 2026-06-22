@@ -7,9 +7,10 @@ reference org, and how to operate it. All content is sanitized of non-org names.
 
 | Repo | Purpose | Notes |
 | --- | --- | --- |
-| `.github` | Org community-health defaults + reusable attested quality-gate workflows + signer workflows | template; reusables: sca-osv, trivy, scorecard, attest-scan, sign-and-attest, verify-attestation, pin-check |
+| `.github` | Org community-health defaults + reusable attested quality-gate workflows + signer workflows | template; reusables: sast-codeql, sca-osv, trivy, checkov, scorecard, vex, attest-scan, verify-gates, actionlint, sign-and-attest, verify-attestation, pin-check |
 | `attested-pipeline-template` | Language-agnostic attested release pipeline | template; release `v0.1.0` published + attested |
 | `rust-template` | Rust attested template (5-platform build, SBOM, gates) | template; release `v0.1.0` published + attested |
+| `attested-iac-template` | OpenTofu/Terraform attested IaC template (module + per-cloud examples, Checkov gate) | template (public); initial PR #1 |
 | `docs` | Astro Starlight docs site | live at https://attested-delivery.github.io/docs/ |
 
 ## Automation identity — GitHub App `attested-delivery-ci`
