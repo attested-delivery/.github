@@ -1,0 +1,382 @@
+---
+name: Release
+
+# Attested release of THIS repo's two products — the reusable workflow catalog
+# AND the attested-delivery plugin — as a fail-closed, self-attested use of the
+# org's own architecture (the repo eating its own dog food).
+#
+# These are static artifacts (no container, no compiled binary), so the SLSA
+# backbone is actions/attest-build-provenance (+ anchore/sbom-action for the
+# CycloneDX SBOM), and the fail-closed gate is `gh attestation verify` run inline
+# on the artifact files — the central reusable-verify-gates.yml verifies oci://
+# subjects by digest, not caller-local files.
+#
+# Flow: package (source snapshot + plugin bundle) -> attest-build-provenance +
+#       SBOM on both -> run the applicable gates and seam-sign each verdict bound
+#       to the release subject -> fail-closed verify -> tag-gated GitHub Release.
+#
+# Two artifacts, one identifier prefix:
+#   - attested-delivery-<version>.tar.gz        the workflow catalog / source the
+#                                               consumer pins by SHA (SECURITY.md)
+#   - attested-delivery-plugin-<version>.zip    the installable plugin (root =
+#                                               .github/, bundles the reusables)
+# Gate verdicts bind to the SOURCE snapshot (the authoritative content the gates
+# analyze); both artifacts carry SLSA provenance + an SBOM.
+#
+# Gate reusables are LOCAL refs (./.github/workflows/...): the release verifies
+# the repo against its own current gates.
+#
+# Dry-run: workflow_dispatch exercises the whole package -> attest -> verify
+# chain; the publish job is tag-gated (`if: startsWith(github.ref, 'refs/tags/')`)
+# and skipped, so nothing is published without a tag. A tag publishes nothing
+# whose attestations do not verify.
+
+"on":
+  # Releases are DISABLED for now. workflow_dispatch runs the full
+  # package -> attest -> verify chain as a DRY RUN only (the publish job is
+  # tag-gated, so dispatch never publishes). To enable real releases later,
+  # restore the tag trigger:
+  #   push:
+  #     tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  meta:
+    name: Resolve metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Resolve version (tag, or plugin.json + -dev for dry-run)
+        id: meta
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="$(jq -r '.version // "0.0.0"' .github/.claude-plugin/plugin.json)-dev"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version ${VERSION}"
+
+  # ---------------------------------------------------------------------------
+  # Package both artifacts and attest SLSA build provenance over them. The source
+  # snapshot is the release subject the seam-signed gate verdicts bind to.
+  # ---------------------------------------------------------------------------
+  package:
+    name: Package artifacts
+    needs: [meta]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write      # keyless OIDC -> Sigstore
+      attestations: write  # persist provenance
+    outputs:
+      subject-name: ${{ steps.subject.outputs.name }}
+      subject-digest: ${{ steps.subject.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Package source snapshot + plugin bundle
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Workflow catalog / source release: a reproducible snapshot at this
+          # commit (the 19 reusables + everything consumers pin by SHA).
+          git archive --format=tar.gz \
+            --prefix="attested-delivery-${VERSION}/" \
+            -o "dist/attested-delivery-${VERSION}.tar.gz" "${GITHUB_SHA}"
+          # Plugin release: the installable plugin tree (root = .github/), which
+          # bundles the reusables as ${CLAUDE_PLUGIN_ROOT}/workflows.
+          ( cd .github && zip -qr "${RUNNER_TEMP}/plugin.zip" . -x '.git/*' )
+          cp "${RUNNER_TEMP}/plugin.zip" "dist/attested-delivery-plugin-${VERSION}.zip"
+          sha256sum dist/*
+      - name: Record release subject (the source snapshot)
+        id: subject
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          FILE="attested-delivery-${VERSION}.tar.gz"
+          DIGEST="$(sha256sum "dist/${FILE}" | cut -d' ' -f1)"
+          echo "name=${FILE}" >> "$GITHUB_OUTPUT"
+          echo "digest=sha256:${DIGEST}" >> "$GITHUB_OUTPUT"
+      - name: Attest build provenance (both artifacts)
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: dist/*
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-dist
+          path: dist/*
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  sbom:
+    name: SBOM (generate + attest)
+    needs: [meta, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Download release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-dist
+          path: dist
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: attested-delivery-${{ needs.meta.outputs.version }}-sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Attest SBOM (binds both artifacts to the SBOM)
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: dist/*
+          sbom-path: attested-delivery-${{ needs.meta.outputs.version }}-sbom.cdx.json
+      - name: Upload SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-sbom
+          path: attested-delivery-${{ needs.meta.outputs.version }}-sbom.cdx.json
+          if-no-files-found: error
+
+  # --- Gates over the release source + the seam that signs each verdict --------
+  # Each gate runs its local reusable (SARIF evidence) and the matching attest job
+  # signs that verdict bound to the source snapshot subject. One predicate / call.
+  gate-sast:
+    name: Gate — SAST (CodeQL)
+    needs: [meta]
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+      packages: read
+    uses: ./.github/workflows/reusable-sast-codeql.yml
+    with:
+      languages: actions
+      build-mode: none
+  attest-sast:
+    name: Attest — SAST
+    needs: [package, gate-sast]
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    uses: ./.github/workflows/reusable-attest-scan.yml
+    with:
+      subject-name: ${{ needs.package.outputs.subject-name }}
+      subject-digest: ${{ needs.package.outputs.subject-digest }}
+      predicate-type: https://attested-delivery.github.io/attestations/sast/v1
+      predicate-artifact: ${{ needs.gate-sast.outputs.sarif-artifact }}
+      predicate-filename: ${{ needs.gate-sast.outputs.sarif-filename }}
+
+  gate-semgrep:
+    name: Gate — SAST (Semgrep)
+    needs: [meta]
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/reusable-semgrep.yml
+    with:
+      directory: .
+  attest-semgrep:
+    name: Attest — Semgrep
+    needs: [package, gate-semgrep]
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    uses: ./.github/workflows/reusable-attest-scan.yml
+    with:
+      subject-name: ${{ needs.package.outputs.subject-name }}
+      subject-digest: ${{ needs.package.outputs.subject-digest }}
+      predicate-type: https://attested-delivery.github.io/attestations/semgrep/v1
+      predicate-artifact: ${{ needs.gate-semgrep.outputs.sarif-artifact }}
+      predicate-filename: ${{ needs.gate-semgrep.outputs.sarif-filename }}
+
+  gate-shellcheck:
+    name: Gate — SAST (ShellCheck)
+    needs: [meta]
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/reusable-shellcheck.yml
+  attest-shellcheck:
+    name: Attest — ShellCheck
+    needs: [package, gate-shellcheck]
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    uses: ./.github/workflows/reusable-attest-scan.yml
+    with:
+      subject-name: ${{ needs.package.outputs.subject-name }}
+      subject-digest: ${{ needs.package.outputs.subject-digest }}
+      predicate-type: https://attested-delivery.github.io/attestations/shellcheck/v1
+      predicate-artifact: ${{ needs.gate-shellcheck.outputs.sarif-artifact }}
+      predicate-filename: ${{ needs.gate-shellcheck.outputs.sarif-filename }}
+
+  gate-secrets:
+    name: Gate — secrets
+    needs: [meta]
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/reusable-secrets.yml
+    with:
+      directory: .
+  attest-secrets:
+    name: Attest — secrets
+    needs: [package, gate-secrets]
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    uses: ./.github/workflows/reusable-attest-scan.yml
+    with:
+      subject-name: ${{ needs.package.outputs.subject-name }}
+      subject-digest: ${{ needs.package.outputs.subject-digest }}
+      predicate-type: https://attested-delivery.github.io/attestations/secrets/v1
+      predicate-artifact: ${{ needs.gate-secrets.outputs.sarif-artifact }}
+      predicate-filename: ${{ needs.gate-secrets.outputs.sarif-filename }}
+
+  gate-manifest:
+    name: Gate — manifest integrity
+    needs: [meta]
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/reusable-manifest-review.yml
+    with:
+      directory: .
+  attest-manifest:
+    name: Attest — manifest
+    needs: [package, gate-manifest]
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    uses: ./.github/workflows/reusable-attest-scan.yml
+    with:
+      subject-name: ${{ needs.package.outputs.subject-name }}
+      subject-digest: ${{ needs.package.outputs.subject-digest }}
+      predicate-type: https://attested-delivery.github.io/attestations/manifest/v1
+      predicate-artifact: ${{ needs.gate-manifest.outputs.sarif-artifact }}
+      predicate-filename: ${{ needs.gate-manifest.outputs.sarif-filename }}
+
+  # ---------------------------------------------------------------------------
+  # Fail-closed: an unverifiable artifact does not publish. Verifies SLSA
+  # provenance + SBOM on BOTH artifacts, and the five seam-signed gate verdicts on
+  # the source snapshot subject.
+  # ---------------------------------------------------------------------------
+  verify:
+    name: Verify attestations (fail-closed)
+    needs:
+      [meta, package, sbom, attest-sast, attest-semgrep, attest-shellcheck,
+       attest-secrets, attest-manifest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-dist
+          path: dist
+      - name: Fail-closed attestation verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          SOURCE: ${{ needs.package.outputs.subject-name }}
+          PROV_SIGNER: ${{ github.repository }}/.github/workflows/release.yml
+          SEAM: ${{ github.repository }}/.github/workflows/reusable-attest-scan.yml
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          artifacts=(dist/*)
+          [ "${#artifacts[@]}" -gt 0 ] || { echo "::error::no artifacts to verify"; exit 1; }
+          # SLSA provenance + SBOM on every release artifact. --signer-workflow is
+          # pinned (not just --repo) so only release.yml can have produced them.
+          for f in "${artifacts[@]}"; do
+            echo "=== ${f} ==="
+            gh attestation verify "$f" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$PROV_SIGNER" \
+              --predicate-type https://slsa.dev/provenance/v1
+            gh attestation verify "$f" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$PROV_SIGNER" \
+              --predicate-type https://cyclonedx.org/bom
+          done
+          # Seam-signed gate verdicts bind to the SOURCE snapshot (SLSA L3 SAN is
+          # the central reusable-attest-scan.yml, so --signer-workflow is required;
+          # one signer per command).
+          for pt in sast semgrep shellcheck secrets manifest; do
+            echo "=== gate ${pt} on ${SOURCE} ==="
+            gh attestation verify "dist/${SOURCE}" --owner "$OWNER" \
+              --signer-workflow "$SEAM" \
+              --predicate-type "https://attested-delivery.github.io/attestations/${pt}/v1"
+          done
+          echo "All attestations verified — provenance + SBOM (both artifacts) + 5 gate verdicts (source)."
+
+  # ---------------------------------------------------------------------------
+  # Publish: GATED on verify AND on a tag ref. Skipped on workflow_dispatch.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [meta, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create the GitHub Release
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-dist
+          path: dist
+      - name: Download SBOM
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-sbom
+          path: dist
+      - name: Generate checksums
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          ( cd dist && sha256sum -- *.tar.gz *.zip *.cdx.json > "${RUNNER_TEMP}/sums.txt" )
+          mv "${RUNNER_TEMP}/sums.txt" "dist/attested-delivery-${VERSION}-checksums.txt"
+          cat "dist/attested-delivery-${VERSION}-checksums.txt"
+      - name: Create GitHub Release (GitHub-native; no third-party action)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          PRERELEASE=()
+          case "${GITHUB_REF_NAME}" in *-*) PRERELEASE=(--prerelease) ;; esac
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "attested-delivery ${VERSION}" \
+            --generate-notes \
+            "${PRERELEASE[@]}"

@@ -1,0 +1,104 @@
+---
+name: quality-gates
+
+# Self-applied merge-time gates. This repo runs its OWN central reusables over its
+# own content — the 19 reusable workflows plus the attested-delivery plugin —
+# proving the architecture on itself. Callers use LOCAL refs
+# (./.github/workflows/...) so each gate always exercises the reusable version in
+# this same commit (true dogfooding; no self-SHA to bump, no cross-repo hop).
+#
+# Each gate normalizes on SARIF and surfaces in the Security tab; wire
+# "Code scanning results" as a required status check to make it a merge gate.
+# release.yml additionally re-runs the artifact-characterizing gates over the
+# release subject and signs each verdict as a digest-bound attestation; posture
+# (Scorecard) is a repo-level signal and stays here, not re-attested per release.
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "37 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Structural gates -----------------------------------------------------------
+  actionlint:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/reusable-actionlint.yml
+
+  pin-check:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/pin-check.yml
+
+  # SAST — CodeQL over the repo's own workflows. default setup is not-configured
+  # on this repo, so advanced CodeQL runs without the default/advanced collision.
+  sast:
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+      packages: read
+    uses: ./.github/workflows/reusable-sast-codeql.yml
+    with:
+      languages: actions
+      build-mode: none
+
+  # SAST — Semgrep over bundled source (the Python embedded in the reusables).
+  semgrep:
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/reusable-semgrep.yml
+    with:
+      directory: .
+
+  # SAST — ShellCheck over shell (docs/onboarding/org/harden.sh + run: blocks).
+  shellcheck:
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/reusable-shellcheck.yml
+
+  # Secret scanning — Gitleaks (soft-fail) + TruffleHog (verified-only hard-fail).
+  secrets:
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/reusable-secrets.yml
+    with:
+      directory: .
+
+  # Manifest integrity — the plugin.json (and any marketplace.json) under review.
+  manifest-review:
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/reusable-manifest-review.yml
+    with:
+      directory: .
+
+  # Supply-chain posture — repo-level signal (push/schedule only, not on PRs).
+  posture:
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+    uses: ./.github/workflows/reusable-scorecard.yml
+    with:
+      publish-results: false
