@@ -84,31 +84,58 @@ def external_entries(marketplace: dict) -> list[tuple[int, dict]]:
     return out
 
 
-def repin_text(raw: str, old_sha: str, new_sha: str, new_ref: str) -> str:
+def repin_text(raw: str, plugin_name: str, old_sha: str, new_sha: str, new_ref: str) -> str:
     """Re-pin a single external entry in the RAW marketplace.json text.
 
-    Surgical by design: the 40-char sha is globally unique, so we replace exactly
-    that token, then rewrite the nearest preceding `"ref": "..."` (the same
-    source object — ref precedes sha in the canonical layout). Everything else,
-    including key order, indentation, and inline arrays, is preserved byte-for-
-    byte. Pure function — no IO — so it is unit-testable on a fixture.
+    Scoped to the named entry, NOT the whole file: several plugins may legitimately
+    pin the same commit sha (e.g. multiple `git-subdir` plugins from one repo), so
+    a global sha replace would be wrong. We locate the entry by its unique `name`,
+    bound its span by the next `"name"` key, then rewrite the sha and ref inside
+    that span only — inserting a `ref` line before the sha when the entry has none.
+    Formatting, key order, and inline arrays elsewhere are preserved byte-for-byte.
+    Pure function — no IO — so it is unit-testable on a fixture.
     """
     if not SHA_RE.match(new_sha):
         raise ValueError(f"new_sha is not a 40-char sha: {new_sha!r}")
-    occurrences = raw.count(old_sha)
-    if occurrences != 1:
-        raise ValueError(
-            f"expected exactly one occurrence of old sha {old_sha!r}, found {occurrences}"
+
+    name_m = re.search(r'"name"\s*:\s*"' + re.escape(plugin_name) + r'"', raw)
+    if not name_m:
+        raise ValueError(f"plugin {plugin_name!r} not found in marketplace")
+    seg_start = name_m.end()
+    nxt = re.search(r'"name"\s*:\s*"', raw[seg_start:])
+    if nxt is None:
+        seg_end = len(raw)
+    else:
+        seg_end = seg_start + nxt.start()
+    segment = raw[seg_start:seg_end]
+
+    if not re.search(r'"sha"\s*:\s*"' + re.escape(old_sha) + r'"', segment):
+        raise ValueError(f"sha {old_sha!r} not found in entry {plugin_name!r}")
+
+    # Rewrite the sha value (only this entry's sha key).
+    segment = re.sub(
+        r'("sha"\s*:\s*")' + re.escape(old_sha) + r'(")',
+        lambda m: m.group(1) + new_sha + m.group(2), segment, count=1,
+    )
+    # Rewrite the ref label if present; otherwise insert one before the sha line.
+    if re.search(r'"ref"\s*:\s*"', segment):
+        segment = re.sub(
+            r'("ref"\s*:\s*")[^"]*(")',
+            lambda m: m.group(1) + new_ref + m.group(2), segment, count=1,
         )
-    sha_idx = raw.index(old_sha)
-    head, tail = raw[:sha_idx], raw[sha_idx + len(old_sha):]
+    else:
+        line_m = re.search(r'(?m)^([ \t]*)"sha"\s*:', segment)
+        if line_m:  # canonical multi-line layout — insert a matching-indent line
+            indent, pos = line_m.group(1), line_m.start()
+            segment = segment[:pos] + f'{indent}"ref": "{new_ref}",\n' + segment[pos:]
+        else:  # inline source object — insert before the sha key
+            inline = re.search(r'"sha"\s*:', segment)
+            if inline is None:  # unreachable: sha presence validated above
+                raise ValueError(f"sha key vanished for {plugin_name!r}")
+            pos = inline.start()
+            segment = segment[:pos] + f'"ref": "{new_ref}", ' + segment[pos:]
 
-    refs = list(re.finditer(r'("ref"\s*:\s*")([^"]*)(")', head))
-    if refs:
-        m = refs[-1]
-        head = head[: m.start()] + m.group(1) + new_ref + m.group(3) + head[m.end():]
-
-    return head + new_sha + tail
+    return raw[:seg_start] + segment + raw[seg_end:]
 
 
 # --------------------------------------------------------------------------- #
@@ -307,7 +334,11 @@ def default_branch(repo: str) -> str:
 def open_pr(repo: str, plugin_name: str, new_text: str, marketplace_path: str,
             new_ref: str, body: str) -> None:
     """Branch, commit the single-entry re-pin, push, open PR, enable auto-merge."""
-    branch = f"deps/external-plugin/{plugin_name}"
+    # Plugin names aren't guaranteed to be valid git ref components (spaces, '/',
+    # ':' ...) — slugify for the branch while keeping the real name for the
+    # title/commit.
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", plugin_name).strip("-") or "plugin"
+    branch = f"deps/external-plugin/{slug}"
     base = default_branch(repo)
     git("switch", "-C", branch, f"origin/{base}")
     with open(marketplace_path, "w", encoding="utf-8") as fh:
@@ -323,14 +354,23 @@ def open_pr(repo: str, plugin_name: str, new_text: str, marketplace_path: str,
         body_file = bf.name
     try:
         title = f"chore(catalog): re-pin {plugin_name} to {new_ref}"
-        existing = gh("pr", "list", "--repo", repo, "--head", branch, "--json", "number",
-                      "--jq", "length", check=False).stdout.strip()
-        if existing and existing != "0":
-            gh("pr", "edit", branch, "--repo", repo, "--title", title, "--body-file", body_file, check=False)
+        # gh pr edit/merge want a PR number/URL — a branch name is not a reliable
+        # selector — so resolve the number for this head branch and pass it.
+        def pr_number() -> str:
+            return gh("pr", "list", "--repo", repo, "--head", branch, "--json", "number",
+                      "--jq", ".[0].number // empty", check=False).stdout.strip()
+
+        num = pr_number()
+        if num:
+            gh("pr", "edit", num, "--repo", repo, "--title", title, "--body-file", body_file, check=False)
         else:
             gh("pr", "create", "--repo", repo, "--head", branch, "--base", base,
                "--title", title, "--body-file", body_file, check=False)
-        gh("pr", "merge", "--repo", repo, branch, "--auto", "--squash", check=False)
+            num = pr_number()
+        if num:
+            gh("pr", "merge", num, "--repo", repo, "--auto", "--squash", check=False)
+        else:
+            log_warning(f"{plugin_name}: could not resolve a PR number on {branch} — auto-merge not enabled")
     finally:
         os.unlink(body_file)
     log_notice(f"opened/updated auto-merge PR for {plugin_name} on {branch}")
@@ -377,7 +417,7 @@ def mode_update(repo: str, marketplace_path: str, predicates: list[tuple[str, st
                 )
                 continue
 
-            new_text = repin_text(raw, old_sha, new_sha, tag)
+            new_text = repin_text(raw, name, old_sha, new_sha, tag)
             body = render_pr_body(name, src_repo, old_ref, tag, old_sha, new_sha, release, evidence)
             print(f"=== {name}: {old_ref} ({old_sha[:12]}) -> {tag} ({new_sha[:12]}) — VERIFIED ===")
             if dry_run:
