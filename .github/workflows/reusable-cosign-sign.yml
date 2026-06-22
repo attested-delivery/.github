@@ -41,6 +41,9 @@ on:
       bundle-filename:
         description: 'cosign bundle filename within the artifact'
         value: ${{ jobs.cosign-sign.outputs.bundle }}
+      certificate-identity:
+        description: 'Regex matching the keyless signer identity (for verify-blob by consumers)'
+        value: ${{ jobs.cosign-sign.outputs.identity }}
 
 permissions:
   contents: read
@@ -54,6 +57,7 @@ jobs:
       contents: read
     outputs:
       bundle: ${{ steps.sign.outputs.bundle }}
+      identity: ${{ steps.sign.outputs.identity }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -67,18 +71,21 @@ jobs:
         id: sign
         env:
           BLOB: ${{ inputs.blob-path }}
+          SIGNER_IDENTITY_RE: '^https://github\.com/attested-delivery/\.github/\.github/workflows/reusable-cosign-sign\.yml@'
         run: |
           set -euo pipefail
           test -f "${BLOB}" || { echo "::error::blob not found: ${BLOB}"; exit 1; }
           bundle="$(basename "${BLOB}").cosign.bundle"
           cosign sign-blob --yes "${BLOB}" --bundle "${bundle}"
-          # Re-verify in-run: the signer identity must be this repo's workflow,
-          # issued by the GitHub Actions OIDC provider. Fail-closed.
+          # Re-verify in-run, fail-closed. Under keyless signing the Fulcio cert
+          # SAN is the SIGNER workflow (this reusable, in attested-delivery/.github),
+          # NOT the caller repo — so match this reusable's identity, at any @ref.
           cosign verify-blob "${BLOB}" \
             --bundle "${bundle}" \
-            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/" \
+            --certificate-identity-regexp "${SIGNER_IDENTITY_RE}" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
           echo "bundle=${bundle}" >> "$GITHUB_OUTPUT"
+          echo "identity=${SIGNER_IDENTITY_RE}" >> "$GITHUB_OUTPUT"
           echo "Signed + verified: ${BLOB} -> ${bundle}"
 
       - name: Upload cosign bundle
