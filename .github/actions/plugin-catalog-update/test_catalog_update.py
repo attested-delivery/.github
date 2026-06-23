@@ -125,6 +125,50 @@ class RepinText(unittest.TestCase):
             cu.repin_text(FIXTURE, "acme-widgets", "9999999999999999999999999999999999999999",
                           NEW_SHA, "v2.0.0")
 
+    def test_plugin_named_like_marketplace(self):
+        # A plugin whose name equals the marketplace `name` must re-pin its own
+        # entry, not mis-segment on the marketplace-level name key.
+        fixture = """\
+{
+  "name": "attested-delivery",
+  "owner": { "name": "attested-delivery" },
+  "plugins": [
+    {
+      "name": "attested-delivery",
+      "source": {
+        "source": "git-subdir", "repo": "a/b", "subdir": "p",
+        "ref": "v1", "sha": "1111111111111111111111111111111111111111"
+      }
+    }
+  ]
+}
+"""
+        out = cu.repin_text(fixture, "attested-delivery", OLD_SHA, NEW_SHA, "v2")
+        src = json.loads(out)["plugins"][0]["source"]
+        self.assertEqual(src["sha"], NEW_SHA)
+        self.assertEqual(src["ref"], "v2")
+
+
+class BranchSlug(unittest.TestCase):
+    def test_git_invalid_forms_normalized(self):
+        cases = {
+            "acme/widgets:beta": "acme-widgets-beta",   # slashes/colon → -
+            "my plugin": "my-plugin",                   # space → -
+            "..dots..": "dots",                         # collapse + strip dots
+            ".hidden": "hidden",                         # leading dot
+            "trailing.": "trailing",                     # trailing dot
+            "weird.lock": "weird",                       # trailing .lock
+            "！！！": "plugin",                           # all-invalid → fallback
+        }
+        for raw, want in cases.items():
+            self.assertEqual(cu.branch_slug(raw), want, raw)
+        # No result starts/ends with '.' or '-', has '..', or ends with '.lock'.
+        for raw in cases:
+            s = cu.branch_slug(raw)
+            self.assertFalse(s.startswith((".", "-")) or s.endswith((".", "-")))
+            self.assertNotIn("..", s)
+            self.assertFalse(s.endswith(".lock"))
+
 
 class ExternalEntries(unittest.TestCase):
     def test_only_object_external_sources(self):

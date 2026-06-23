@@ -98,10 +98,14 @@ def repin_text(raw: str, plugin_name: str, old_sha: str, new_sha: str, new_ref: 
     if not SHA_RE.match(new_sha):
         raise ValueError(f"new_sha is not a 40-char sha: {new_sha!r}")
 
-    name_m = re.search(r'"name"\s*:\s*"' + re.escape(plugin_name) + r'"', raw)
+    # Anchor inside the `plugins` array so a plugin whose name equals the
+    # marketplace `name` / `owner.name` can't mis-segment on those earlier keys.
+    anchor = re.search(r'"plugins"\s*:\s*\[', raw)
+    base = anchor.end() if anchor is not None else 0
+    name_m = re.search(r'"name"\s*:\s*"' + re.escape(plugin_name) + r'"', raw[base:])
     if not name_m:
         raise ValueError(f"plugin {plugin_name!r} not found in marketplace")
-    seg_start = name_m.end()
+    seg_start = base + name_m.end()
     nxt = re.search(r'"name"\s*:\s*"', raw[seg_start:])
     if nxt is None:
         seg_end = len(raw)
@@ -331,14 +335,25 @@ def default_branch(repo: str) -> str:
     return proc.stdout.strip() or "main"
 
 
+def branch_slug(plugin_name: str) -> str:
+    """A git-ref-safe slug for a plugin name (for the PR branch).
+
+    Plugin names may contain characters git rejects in a ref component. Map any
+    non-[A-Za-z0-9._-] run to '-', collapse dot runs (kills '..'), strip leading/
+    trailing '.'/'-', drop a trailing '.lock', and fall back to 'plugin'. Keeps
+    the real name for the PR title/commit.
+    """
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", plugin_name)
+    slug = re.sub(r"\.{2,}", ".", slug).strip(".-")
+    if slug.endswith(".lock"):
+        slug = slug[: -len(".lock")].strip(".-")
+    return slug or "plugin"
+
+
 def open_pr(repo: str, plugin_name: str, new_text: str, marketplace_path: str,
             new_ref: str, body: str) -> None:
     """Branch, commit the single-entry re-pin, push, open PR, enable auto-merge."""
-    # Plugin names aren't guaranteed to be valid git ref components (spaces, '/',
-    # ':' ...) — slugify for the branch while keeping the real name for the
-    # title/commit.
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", plugin_name).strip("-") or "plugin"
-    branch = f"deps/external-plugin/{slug}"
+    branch = f"deps/external-plugin/{branch_slug(plugin_name)}"
     base = default_branch(repo)
     git("switch", "-C", branch, f"origin/{base}")
     with open(marketplace_path, "w", encoding="utf-8") as fh:
