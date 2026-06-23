@@ -84,6 +84,21 @@ def external_entries(marketplace: dict) -> list[tuple[int, dict]]:
     return out
 
 
+def source_repo(src: dict) -> str:
+    """owner/repo for an external source — from `repo`, else parsed from `url`.
+
+    claude marketplace `git-subdir`/`url` sources carry a git `url` (not a
+    `repo`); `github` sources carry `repo`. Accept both.
+    """
+    r = src.get("repo")
+    if r:
+        return r.strip("/")
+    url = src.get("url", "")
+    return (url.removeprefix("https://github.com/")
+               .removeprefix("git@github.com:")
+               .removesuffix(".git").strip("/"))
+
+
 def repin_text(raw: str, plugin_name: str, old_sha: str, new_sha: str, new_ref: str) -> str:
     """Re-pin a single external entry in the RAW marketplace.json text.
 
@@ -407,7 +422,7 @@ def mode_update(repo: str, marketplace_path: str, predicates: list[tuple[str, st
         # whole repo's run — isolate each entry, warn, and carry on.
         try:
             src = plugin["source"]
-            src_repo = src.get("repo", "")
+            src_repo = source_repo(src)
             old_sha = str(src.get("sha", ""))
             old_ref = str(src.get("ref", ""))
 
@@ -457,7 +472,7 @@ def mode_verify(marketplace_path: str, predicates: list[tuple[str, str | None]])
     for _, plugin in entries:
         name = plugin.get("name", "?")
         src = plugin["source"]
-        src_repo = src.get("repo", "")
+        src_repo = source_repo(src)
         # Verify the release artifact, which is keyed by TAG. Prefer the entry's
         # ref label; if it omits one, recover the tag from the pinned sha rather
         # than handing a bare commit sha to `gh release download`.

@@ -241,3 +241,16 @@ class RenderBody(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SourceRepo(unittest.TestCase):
+    def test_repo_field(self):
+        self.assertEqual(cu.source_repo({"repo": "o/r"}), "o/r")
+
+    def test_url_field(self):
+        self.assertEqual(cu.source_repo(
+            {"url": "https://github.com/attested-delivery/.github.git"}),
+            "attested-delivery/.github")
+
+    def test_url_no_suffix(self):
+        self.assertEqual(cu.source_repo({"url": "https://github.com/o/r"}), "o/r")
