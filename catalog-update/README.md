@@ -59,10 +59,27 @@ target's `catalog-admission` so the hub and the gate agree.
 
 ## Owner setup
 
+The hub reads the `attested-delivery-ci` App's id from an **org variable** and its
+private key from an **org secret** (the id is a public identifier, the key is not).
+Scope them to the `.github` repo, where the hub runs:
+
+```bash
+# App id (public identifier) — org variable
+gh variable set CATALOG_UPDATER_APP_ID --org attested-delivery \
+  --visibility selected --repos .github --body "<APP_ID>"
+
+# App private key — org secret (reads the .pem; value never printed)
+gh secret set CATALOG_UPDATER_APP_PRIVATE_KEY --org attested-delivery \
+  --visibility selected --repos .github < ~/.secrets/attested-delivery-ci.pem
+```
+
+Also:
+
 - Allow-list `actions/create-github-app-token` (it is `actions/*`, intended-allowed
   — confirm, don't assume).
-- Set the App credentials as secrets on `attested-delivery/.github` (names only):
-  `gh secret set CATALOG_UPDATER_APP_ID`, `gh secret set CATALOG_UPDATER_APP_PRIVATE_KEY`.
+- The App needs **contents** (write), **pull requests** (write), and **metadata**
+  (read, to enumerate `installation/repositories`) — `attested-delivery-ci`
+  already has these.
 - **Zero-touch ruleset bypass:** on each target repo, let the App actor bypass the
   required human review on `deps/external-plugin/*` PRs while keeping
   `catalog-admission` + the gates as required checks — so the fail-closed gate is
