@@ -290,5 +290,23 @@ class RepinAuthorNameCollision(unittest.TestCase):
             cu.repin_text(self.MP, "nope", "a" * 40, "b" * 40, "v0.1.1")
 
 
+
+class SummarizeVerify(unittest.TestCase):
+    JSON = (
+        '[{"verificationResult": {"statement": {"predicateType": "https://slsa.dev/provenance/v1"},'
+        ' "signature": {"certificate": {"buildSignerURI": "https://github.com/o/r/.github/workflows/a.yml@refs/tags/v1",'
+        ' "issuer": "https://token.actions.githubusercontent.com"}}}}]'
+    )
+
+    def test_distills_signer_and_predicate(self):
+        out = cu._summarize_verify(self.JSON)
+        self.assertIn("https://slsa.dev/provenance/v1", out)
+        self.assertIn("a.yml@refs/tags/v1", out)
+        self.assertIn("token.actions.githubusercontent.com", out)
+
+    def test_non_json_falls_back_to_raw(self):
+        self.assertEqual(cu._summarize_verify("plain text"), "plain text")
+
+
 if __name__ == "__main__":
     unittest.main()

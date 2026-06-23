@@ -272,6 +272,27 @@ def parse_predicates(spec: str) -> list[tuple[str, str | None]]:
     return rows
 
 
+def _summarize_verify(stdout: str) -> str:
+    """Distil `gh attestation verify --format json` into a compact, readable
+    evidence block (predicate, signer identity, issuer) for the PR body. Falls
+    back to the raw text if it is not the expected JSON."""
+    try:
+        recs = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError):
+        return stdout.strip()
+    blocks = []
+    for r in recs:
+        vr = r.get("verificationResult", {})
+        cert = vr.get("signature", {}).get("certificate", {})
+        stmt = vr.get("statement", {})
+        blocks.append(
+            f"predicate: {stmt.get('predicateType', '?')}\n"
+            f"signer:    {cert.get('buildSignerURI') or cert.get('subjectAlternativeName', '?')}\n"
+            f"issuer:    {cert.get('issuer', '?')}"
+        )
+    return "\n\n".join(blocks)
+
+
 def verify_subject(subject: str, repo: str, predicates: list[tuple[str, str | None]]) -> list[dict]:
     """Verify one subject (file path or oci ref) against each required predicate.
 
@@ -281,16 +302,22 @@ def verify_subject(subject: str, repo: str, predicates: list[tuple[str, str | No
     """
     results = []
     for predicate, signer in predicates:
-        cmd = ["attestation", "verify", subject, "--repo", repo, "--predicate-type", predicate]
+        cmd = ["attestation", "verify", subject, "--repo", repo,
+               "--predicate-type", predicate, "--format", "json"]
         if signer:
             cmd += ["--signer-workflow", signer]
         proc = gh(*cmd, check=False)
+        ok = proc.returncode == 0
+        # gh attestation verify suppresses its human-readable summary when stdout
+        # is not a TTY (headless CI), leaving stdout+stderr empty on success — so
+        # capture --format json and distil it; on failure stderr carries the error.
+        output = _summarize_verify(proc.stdout) if ok else (proc.stdout + proc.stderr).strip()
         results.append(
             {
                 "predicate": predicate,
                 "signer": signer or f"repo:{repo}",
-                "ok": proc.returncode == 0,
-                "output": (proc.stdout + proc.stderr).strip(),
+                "ok": ok,
+                "output": output,
             }
         )
     return results
