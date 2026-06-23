@@ -100,33 +100,75 @@ def source_repo(src: dict) -> str:
     return url.removesuffix(".git").strip("/")
 
 
+def _entry_span(raw: str, plugin_name: str) -> tuple[int, int] | None:
+    """Text span [start, end) of the plugins-array element whose OWN top-level
+    `name` == plugin_name.
+
+    Brace-matched (string-aware) and confirmed by parsing the element as JSON, so
+    a NESTED key that happens to equal plugin_name — e.g. another entry's
+    `author.name` — can never mis-match the entry. Returns None if not found.
+    """
+    anchor = re.search(r'"plugins"\s*:\s*\[', raw)
+    i = anchor.end() if anchor is not None else 0
+    n = len(raw)
+    while i < n:
+        while i < n and raw[i] not in "{]":
+            i += 1
+        if i >= n or raw[i] == "]":
+            return None
+        start, depth, in_str, esc = i, 0, False, False
+        j = i
+        while j < n:
+            c = raw[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            elif c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    block = raw[start:j + 1]
+                    try:
+                        if json.loads(block).get("name") == plugin_name:
+                            return start, j + 1
+                    except json.JSONDecodeError:
+                        pass
+                    i = j + 1
+                    break
+            j += 1
+        else:
+            return None
+    return None
+
+
 def repin_text(raw: str, plugin_name: str, old_sha: str, new_sha: str, new_ref: str) -> str:
     """Re-pin a single external entry in the RAW marketplace.json text.
 
     Scoped to the named entry, NOT the whole file: several plugins may legitimately
     pin the same commit sha (e.g. multiple `git-subdir` plugins from one repo), so
-    a global sha replace would be wrong. We locate the entry by its unique `name`,
-    bound its span by the next `"name"` key, then rewrite the sha and ref inside
-    that span only — inserting a `ref` line before the sha when the entry has none.
+    a global sha replace would be wrong. We locate the entry via `_entry_span`
+    (brace-matched, JSON-confirmed top-level `name`), then rewrite the sha and ref
+    inside that span only — inserting a `ref` line before the sha when none exists.
     Formatting, key order, and inline arrays elsewhere are preserved byte-for-byte.
     Pure function — no IO — so it is unit-testable on a fixture.
     """
     if not SHA_RE.match(new_sha):
         raise ValueError(f"new_sha is not a 40-char sha: {new_sha!r}")
 
-    # Anchor inside the `plugins` array so a plugin whose name equals the
-    # marketplace `name` / `owner.name` can't mis-segment on those earlier keys.
-    anchor = re.search(r'"plugins"\s*:\s*\[', raw)
-    base = anchor.end() if anchor is not None else 0
-    name_m = re.search(r'"name"\s*:\s*"' + re.escape(plugin_name) + r'"', raw[base:])
-    if not name_m:
+    # Scope to the plugins-array element whose OWN top-level name == plugin_name
+    # (brace-matched + JSON-confirmed), so a nested `author.name` equal to the
+    # plugin name can't mis-segment the rewrite onto the wrong entry.
+    span = _entry_span(raw, plugin_name)
+    if span is None:
         raise ValueError(f"plugin {plugin_name!r} not found in marketplace")
-    seg_start = base + name_m.end()
-    nxt = re.search(r'"name"\s*:\s*"', raw[seg_start:])
-    if nxt is None:
-        seg_end = len(raw)
-    else:
-        seg_end = seg_start + nxt.start()
+    seg_start, seg_end = span
     segment = raw[seg_start:seg_end]
 
     if not re.search(r'"sha"\s*:\s*"' + re.escape(old_sha) + r'"', segment):
