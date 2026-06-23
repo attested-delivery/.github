@@ -40,7 +40,11 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${INPUT_TAG:-${EVENT_TAG}}"
+          TAG="${TAG#refs/tags/}"   # accept a full ref; reduce to the tag name
           [ -n "${TAG}" ] || { echo "::error::no release tag resolved"; exit 1; }
+          case "${TAG}" in
+            */*) echo "::error::invalid tag '${TAG}' (must be a bare tag name, no '/')"; exit 1 ;;
+          esac
           echo "tag=${TAG}" >>"${GITHUB_OUTPUT}"
           echo "version=${TAG#v}" >>"${GITHUB_OUTPUT}"
 
