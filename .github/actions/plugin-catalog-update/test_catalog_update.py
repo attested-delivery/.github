@@ -258,5 +258,37 @@ class SourceRepo(unittest.TestCase):
         self.assertEqual(cu.source_repo({"repo": " o/r/ "}), "o/r")
 
 
+
+class RepinAuthorNameCollision(unittest.TestCase):
+    """Regression: an entry's author.name equal to another plugin's name must
+    not mis-target the rewrite (the real attested-reference/attested-delivery case)."""
+
+    MP = (
+        '{\n  "name": "mp",\n  "plugins": [\n'
+        '    { "name": "local-ref", "source": "./plugins/local-ref",\n'
+        '      "author": { "name": "attested-delivery" } },\n'
+        '    { "name": "attested-delivery",\n'
+        '      "source": { "source": "git-subdir", "url": "https://github.com/o/r.git",\n'
+        '        "path": ".", "ref": "v0.1.0", "sha": "%s" },\n'
+        '      "author": { "name": "attested-delivery" } }\n'
+        '  ]\n}\n'
+    ) % ("a" * 40)
+
+    def test_targets_correct_entry(self):
+        new = "b" * 40
+        out = cu.repin_text(self.MP, "attested-delivery", "a" * 40, new, "v0.1.1")
+        import json as _j
+        plugins = _j.loads(out)["plugins"]
+        ext = [p for p in plugins if isinstance(p.get("source"), dict)][0]
+        loc = [p for p in plugins if not isinstance(p.get("source"), dict)][0]
+        self.assertEqual(ext["source"]["sha"], new)
+        self.assertEqual(ext["source"]["ref"], "v0.1.1")
+        self.assertEqual(loc["source"], "./plugins/local-ref")  # untouched
+
+    def test_missing_plugin_raises(self):
+        with self.assertRaises(ValueError):
+            cu.repin_text(self.MP, "nope", "a" * 40, "b" * 40, "v0.1.1")
+
+
 if __name__ == "__main__":
     unittest.main()
