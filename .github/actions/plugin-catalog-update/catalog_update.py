@@ -282,13 +282,17 @@ def _summarize_verify(stdout: str) -> str:
         return stdout.strip()
     if not isinstance(recs, list):
         return stdout.strip()
+
+    def _d(v: object) -> dict:
+        return v if isinstance(v, dict) else {}
+
     blocks = []
     for r in recs:
-        if not isinstance(r, dict):
+        vr = _d(_d(r).get("verificationResult"))
+        if not vr:  # non-dict record, or no usable verificationResult — skip
             continue
-        vr = r.get("verificationResult") or {}
-        cert = (vr.get("signature") or {}).get("certificate") or {}
-        stmt = vr.get("statement") or {}
+        cert = _d(_d(vr.get("signature")).get("certificate"))
+        stmt = _d(vr.get("statement"))
         blocks.append(
             f"predicate: {stmt.get('predicateType', '?')}\n"
             f"signer:    {cert.get('buildSignerURI') or cert.get('subjectAlternativeName', '?')}\n"

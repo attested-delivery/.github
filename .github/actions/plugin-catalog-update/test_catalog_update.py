@@ -317,6 +317,12 @@ class SummarizeVerify(unittest.TestCase):
         # a list with a non-dict record must not crash; falls back when no blocks
         self.assertEqual(cu._summarize_verify('[1, 2]'), '[1, 2]')
 
+    def test_malformed_nested_falls_back(self):
+        # verificationResult (or signature/statement) being a non-dict must not crash
+        for raw in ('[{"verificationResult": "x"}]',
+                    '[{"verificationResult": {"signature": "x", "statement": 3}}]'):
+            self.assertEqual(cu._summarize_verify(raw), raw)
+
 
 if __name__ == "__main__":
     unittest.main()
