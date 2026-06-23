@@ -289,14 +289,17 @@ def _summarize_verify(stdout: str) -> str:
     blocks = []
     for r in recs:
         vr = _d(_d(r).get("verificationResult"))
-        if not vr:  # non-dict record, or no usable verificationResult — skip
-            continue
         cert = _d(_d(vr.get("signature")).get("certificate"))
         stmt = _d(vr.get("statement"))
+        predicate = stmt.get("predicateType")
+        signer = cert.get("buildSignerURI") or cert.get("subjectAlternativeName")
+        issuer = cert.get("issuer")
+        if not (predicate or signer or issuer):
+            continue  # non-dict / junk record with nothing usable — skip it
         blocks.append(
-            f"predicate: {stmt.get('predicateType', '?')}\n"
-            f"signer:    {cert.get('buildSignerURI') or cert.get('subjectAlternativeName', '?')}\n"
-            f"issuer:    {cert.get('issuer', '?')}"
+            f"predicate: {predicate or '?'}\n"
+            f"signer:    {signer or '?'}\n"
+            f"issuer:    {issuer or '?'}"
         )
     # Empty/unexpected shape -> fall back to raw so the evidence block is never blank.
     return "\n\n".join(blocks) if blocks else stdout.strip()
