@@ -307,6 +307,16 @@ class SummarizeVerify(unittest.TestCase):
     def test_non_json_falls_back_to_raw(self):
         self.assertEqual(cu._summarize_verify("plain text"), "plain text")
 
+    def test_empty_list_falls_back_to_raw(self):
+        self.assertEqual(cu._summarize_verify("[]"), "[]")
+
+    def test_unexpected_shape_falls_back(self):
+        self.assertEqual(cu._summarize_verify('{"a": 1}'), '{"a": 1}')
+
+    def test_skips_non_dict_records(self):
+        # a list with a non-dict record must not crash; falls back when no blocks
+        self.assertEqual(cu._summarize_verify('[1, 2]'), '[1, 2]')
+
 
 if __name__ == "__main__":
     unittest.main()

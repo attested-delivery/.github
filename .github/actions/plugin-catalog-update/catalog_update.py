@@ -280,17 +280,22 @@ def _summarize_verify(stdout: str) -> str:
         recs = json.loads(stdout)
     except (json.JSONDecodeError, TypeError):
         return stdout.strip()
+    if not isinstance(recs, list):
+        return stdout.strip()
     blocks = []
     for r in recs:
-        vr = r.get("verificationResult", {})
-        cert = vr.get("signature", {}).get("certificate", {})
-        stmt = vr.get("statement", {})
+        if not isinstance(r, dict):
+            continue
+        vr = r.get("verificationResult") or {}
+        cert = (vr.get("signature") or {}).get("certificate") or {}
+        stmt = vr.get("statement") or {}
         blocks.append(
             f"predicate: {stmt.get('predicateType', '?')}\n"
             f"signer:    {cert.get('buildSignerURI') or cert.get('subjectAlternativeName', '?')}\n"
             f"issuer:    {cert.get('issuer', '?')}"
         )
-    return "\n\n".join(blocks)
+    # Empty/unexpected shape -> fall back to raw so the evidence block is never blank.
+    return "\n\n".join(blocks) if blocks else stdout.strip()
 
 
 def verify_subject(subject: str, repo: str, predicates: list[tuple[str, str | None]]) -> list[dict]:
@@ -368,14 +373,16 @@ def render_pr_body(plugin_name: str, repo: str, old_ref: str, new_ref: str,
     # One re-verify command per predicate, carrying --signer-workflow for
     # seam-signed predicates so a reviewer reproduces exactly what was verified
     # (--repo alone is insufficient for seam-signed gates; org CLAUDE.md §5).
+    # --format json mirrors how the engine verifies, so the command produces
+    # evidence even in a non-TTY context (plain output is suppressed headless).
     if evidence["checks"]:
         reverify = "\n".join(
-            f"gh attestation verify {subject} --repo {repo} --predicate-type {c['predicate']}"
+            f"gh attestation verify {subject} --repo {repo} --predicate-type {c['predicate']} --format json"
             + ("" if c["signer"].startswith("repo:") else f" \\\n  --signer-workflow {c['signer']}")
             for c in evidence["checks"]
         )
     else:
-        reverify = f"gh attestation verify {subject} --repo {repo} --predicate-type <predicate>"
+        reverify = f"gh attestation verify {subject} --repo {repo} --predicate-type <predicate> --format json"
     return f"""\
 Automated, **verify-first** re-pin of an external plugin to its latest attested release.
 
