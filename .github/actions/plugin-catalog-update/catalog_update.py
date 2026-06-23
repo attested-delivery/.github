@@ -92,11 +92,12 @@ def source_repo(src: dict) -> str:
     """
     r = src.get("repo")
     if r:
-        return r.strip("/")
-    url = src.get("url", "")
-    return (url.removeprefix("https://github.com/")
-               .removeprefix("git@github.com:")
-               .removesuffix(".git").strip("/"))
+        return r.strip().strip("/")
+    # Normalize first (trim whitespace + trailing slashes), THEN drop a .git
+    # suffix — otherwise a `.../r.git/` form would leave `r.git`.
+    url = src.get("url", "").strip().rstrip("/")
+    url = url.removeprefix("https://github.com/").removeprefix("git@github.com:")
+    return url.removesuffix(".git").strip("/")
 
 
 def repin_text(raw: str, plugin_name: str, old_sha: str, new_sha: str, new_ref: str) -> str:

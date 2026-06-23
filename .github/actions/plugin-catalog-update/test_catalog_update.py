@@ -239,8 +239,6 @@ class RenderBody(unittest.TestCase):
         self.assertIn("--signer-workflow owner/.github/.github/workflows/reusable-attest-scan.yml", body)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class SourceRepo(unittest.TestCase):
@@ -254,3 +252,11 @@ class SourceRepo(unittest.TestCase):
 
     def test_url_no_suffix(self):
         self.assertEqual(cu.source_repo({"url": "https://github.com/o/r"}), "o/r")
+
+    def test_url_trailing_slash_and_git(self):
+        self.assertEqual(cu.source_repo({"url": "https://github.com/o/r.git/"}), "o/r")
+        self.assertEqual(cu.source_repo({"repo": " o/r/ "}), "o/r")
+
+
+if __name__ == "__main__":
+    unittest.main()
