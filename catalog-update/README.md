@@ -77,9 +77,9 @@ Also:
 
 - Allow-list `actions/create-github-app-token` (it is `actions/*`, intended-allowed
   — confirm, don't assume).
-- The App needs `contents: write`, `pull_requests: write`, and `metadata: read`
-  (to enumerate `installation/repositories`) — `attested-delivery-ci` already has
-  these.
+- The App needs **contents** (write), **pull requests** (write), and **metadata**
+  (read, to enumerate `installation/repositories`) — `attested-delivery-ci`
+  already has these.
 - **Zero-touch ruleset bypass:** on each target repo, let the App actor bypass the
   required human review on `deps/external-plugin/*` PRs while keeping
   `catalog-admission` + the gates as required checks — so the fail-closed gate is
