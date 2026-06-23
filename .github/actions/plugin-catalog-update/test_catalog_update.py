@@ -35,32 +35,139 @@ FIXTURE = """\
 NEW_SHA = "2222222222222222222222222222222222222222"
 
 
+OLD_SHA = "1111111111111111111111111111111111111111"
+
+# Two plugins from ONE repo at the SAME sha — a legitimate git-subdir layout that
+# the old global-uniqueness re-pin mishandled.
+DUP_FIXTURE = """\
+{
+  "name": "attested-delivery",
+  "plugins": [
+    {
+      "name": "acme-alpha",
+      "source": {
+        "source": "git-subdir", "repo": "acme/suite", "subdir": "plugins/alpha",
+        "ref": "v1.0.0", "sha": "1111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "name": "acme-beta",
+      "source": {
+        "source": "git-subdir", "repo": "acme/suite", "subdir": "plugins/beta",
+        "ref": "v1.0.0", "sha": "1111111111111111111111111111111111111111"
+      }
+    }
+  ]
+}
+"""
+
+# An external entry that omits the optional `ref` label.
+NOREF_FIXTURE = """\
+{
+  "name": "attested-delivery",
+  "plugins": [
+    {
+      "name": "acme-widgets",
+      "source": {
+        "source": "git-subdir",
+        "repo": "acme/widgets",
+        "sha": "1111111111111111111111111111111111111111"
+      }
+    }
+  ]
+}
+"""
+
+
 class RepinText(unittest.TestCase):
     def test_rewrites_sha_and_ref_only(self):
-        out = cu.repin_text(FIXTURE, "1111111111111111111111111111111111111111", NEW_SHA, "v2.0.0")
+        out = cu.repin_text(FIXTURE, "acme-widgets", OLD_SHA, NEW_SHA, "v2.0.0")
         mp = json.loads(out)
         src = mp["plugins"][1]["source"]
         self.assertEqual(src["sha"], NEW_SHA)
         self.assertEqual(src["ref"], "v2.0.0")
 
     def test_local_entry_and_formatting_preserved(self):
-        out = cu.repin_text(FIXTURE, "1111111111111111111111111111111111111111", NEW_SHA, "v2.0.0")
+        out = cu.repin_text(FIXTURE, "acme-widgets", OLD_SHA, NEW_SHA, "v2.0.0")
         # The local source line and the inline keywords array are byte-preserved.
         self.assertIn('"source": "./plugins/attested-reference"', out)
         self.assertIn('"keywords": ["reference", "attested", "example"]', out)
         # Only the sha and ref tokens changed; everything else identical.
-        expected = FIXTURE.replace(
-            "1111111111111111111111111111111111111111", NEW_SHA
-        ).replace('"ref": "v1.2.3"', '"ref": "v2.0.0"')
+        expected = FIXTURE.replace(OLD_SHA, NEW_SHA).replace('"ref": "v1.2.3"', '"ref": "v2.0.0"')
         self.assertEqual(out, expected)
+
+    def test_shared_sha_only_targets_named_entry(self):
+        # Re-pinning acme-beta must NOT touch acme-alpha, even though both pin the
+        # same sha (the old global replace would have hit both / hard-failed).
+        out = cu.repin_text(DUP_FIXTURE, "acme-beta", OLD_SHA, NEW_SHA, "v2.0.0")
+        mp = json.loads(out)
+        self.assertEqual(mp["plugins"][0]["source"]["sha"], OLD_SHA)   # alpha untouched
+        self.assertEqual(mp["plugins"][0]["source"]["ref"], "v1.0.0")
+        self.assertEqual(mp["plugins"][1]["source"]["sha"], NEW_SHA)   # beta re-pinned
+        self.assertEqual(mp["plugins"][1]["source"]["ref"], "v2.0.0")
+
+    def test_inserts_ref_when_absent(self):
+        out = cu.repin_text(NOREF_FIXTURE, "acme-widgets", OLD_SHA, NEW_SHA, "v3.0.0")
+        src = json.loads(out)["plugins"][0]["source"]
+        self.assertEqual(src["sha"], NEW_SHA)
+        self.assertEqual(src["ref"], "v3.0.0")  # ref inserted
 
     def test_rejects_bad_new_sha(self):
         with self.assertRaises(ValueError):
-            cu.repin_text(FIXTURE, "1111111111111111111111111111111111111111", "nope", "v2.0.0")
+            cu.repin_text(FIXTURE, "acme-widgets", OLD_SHA, "nope", "v2.0.0")
 
-    def test_rejects_missing_old_sha(self):
+    def test_rejects_missing_entry(self):
         with self.assertRaises(ValueError):
-            cu.repin_text(FIXTURE, "9999999999999999999999999999999999999999", NEW_SHA, "v2.0.0")
+            cu.repin_text(FIXTURE, "no-such-plugin", OLD_SHA, NEW_SHA, "v2.0.0")
+
+    def test_rejects_sha_not_in_entry(self):
+        with self.assertRaises(ValueError):
+            cu.repin_text(FIXTURE, "acme-widgets", "9999999999999999999999999999999999999999",
+                          NEW_SHA, "v2.0.0")
+
+    def test_plugin_named_like_marketplace(self):
+        # A plugin whose name equals the marketplace `name` must re-pin its own
+        # entry, not mis-segment on the marketplace-level name key.
+        fixture = """\
+{
+  "name": "attested-delivery",
+  "owner": { "name": "attested-delivery" },
+  "plugins": [
+    {
+      "name": "attested-delivery",
+      "source": {
+        "source": "git-subdir", "repo": "a/b", "subdir": "p",
+        "ref": "v1", "sha": "1111111111111111111111111111111111111111"
+      }
+    }
+  ]
+}
+"""
+        out = cu.repin_text(fixture, "attested-delivery", OLD_SHA, NEW_SHA, "v2")
+        src = json.loads(out)["plugins"][0]["source"]
+        self.assertEqual(src["sha"], NEW_SHA)
+        self.assertEqual(src["ref"], "v2")
+
+
+class BranchSlug(unittest.TestCase):
+    def test_git_invalid_forms_normalized(self):
+        cases = {
+            "acme/widgets:beta": "acme-widgets-beta",   # slashes/colon → -
+            "my plugin": "my-plugin",                   # space → -
+            "..dots..": "dots",                         # collapse + strip dots
+            ".hidden": "hidden",                         # leading dot
+            "trailing.": "trailing",                     # trailing dot
+            "weird.lock": "weird",                       # trailing .lock
+            "！！！": "plugin",                           # all-invalid → fallback
+        }
+        for raw, want in cases.items():
+            self.assertEqual(cu.branch_slug(raw), want, raw)
+        # No result starts/ends with '.' or '-', has '..', or ends with '.lock'.
+        for raw in cases:
+            s = cu.branch_slug(raw)
+            self.assertFalse(s.startswith((".", "-")) or s.endswith((".", "-")))
+            self.assertNotIn("..", s)
+            self.assertFalse(s.endswith(".lock"))
 
 
 class ExternalEntries(unittest.TestCase):
