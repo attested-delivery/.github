@@ -290,5 +290,39 @@ class RepinAuthorNameCollision(unittest.TestCase):
             cu.repin_text(self.MP, "nope", "a" * 40, "b" * 40, "v0.1.1")
 
 
+
+class SummarizeVerify(unittest.TestCase):
+    JSON = (
+        '[{"verificationResult": {"statement": {"predicateType": "https://slsa.dev/provenance/v1"},'
+        ' "signature": {"certificate": {"buildSignerURI": "https://github.com/o/r/.github/workflows/a.yml@refs/tags/v1",'
+        ' "issuer": "https://token.actions.githubusercontent.com"}}}}]'
+    )
+
+    def test_distills_signer_and_predicate(self):
+        out = cu._summarize_verify(self.JSON)
+        self.assertIn("https://slsa.dev/provenance/v1", out)
+        self.assertIn("a.yml@refs/tags/v1", out)
+        self.assertIn("token.actions.githubusercontent.com", out)
+
+    def test_non_json_falls_back_to_raw(self):
+        self.assertEqual(cu._summarize_verify("plain text"), "plain text")
+
+    def test_empty_list_falls_back_to_raw(self):
+        self.assertEqual(cu._summarize_verify("[]"), "[]")
+
+    def test_unexpected_shape_falls_back(self):
+        self.assertEqual(cu._summarize_verify('{"a": 1}'), '{"a": 1}')
+
+    def test_skips_non_dict_records(self):
+        # a list with a non-dict record must not crash; falls back when no blocks
+        self.assertEqual(cu._summarize_verify('[1, 2]'), '[1, 2]')
+
+    def test_malformed_nested_falls_back(self):
+        # verificationResult (or signature/statement) being a non-dict must not crash
+        for raw in ('[{"verificationResult": "x"}]',
+                    '[{"verificationResult": {"signature": "x", "statement": 3}}]'):
+            self.assertEqual(cu._summarize_verify(raw), raw)
+
+
 if __name__ == "__main__":
     unittest.main()

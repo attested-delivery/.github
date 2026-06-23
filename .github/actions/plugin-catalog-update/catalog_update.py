@@ -272,6 +272,39 @@ def parse_predicates(spec: str) -> list[tuple[str, str | None]]:
     return rows
 
 
+def _summarize_verify(stdout: str) -> str:
+    """Distil `gh attestation verify --format json` into a compact, readable
+    evidence block (predicate, signer identity, issuer) for the PR body. Falls
+    back to the raw text if it is not the expected JSON."""
+    try:
+        recs = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError):
+        return stdout.strip()
+    if not isinstance(recs, list):
+        return stdout.strip()
+
+    def _d(v: object) -> dict:
+        return v if isinstance(v, dict) else {}
+
+    blocks = []
+    for r in recs:
+        vr = _d(_d(r).get("verificationResult"))
+        cert = _d(_d(vr.get("signature")).get("certificate"))
+        stmt = _d(vr.get("statement"))
+        predicate = stmt.get("predicateType")
+        signer = cert.get("buildSignerURI") or cert.get("subjectAlternativeName")
+        issuer = cert.get("issuer")
+        if not (predicate or signer or issuer):
+            continue  # non-dict / junk record with nothing usable — skip it
+        blocks.append(
+            f"predicate: {predicate or '?'}\n"
+            f"signer:    {signer or '?'}\n"
+            f"issuer:    {issuer or '?'}"
+        )
+    # Empty/unexpected shape -> fall back to raw so the evidence block is never blank.
+    return "\n\n".join(blocks) if blocks else stdout.strip()
+
+
 def verify_subject(subject: str, repo: str, predicates: list[tuple[str, str | None]]) -> list[dict]:
     """Verify one subject (file path or oci ref) against each required predicate.
 
@@ -281,16 +314,22 @@ def verify_subject(subject: str, repo: str, predicates: list[tuple[str, str | No
     """
     results = []
     for predicate, signer in predicates:
-        cmd = ["attestation", "verify", subject, "--repo", repo, "--predicate-type", predicate]
+        cmd = ["attestation", "verify", subject, "--repo", repo,
+               "--predicate-type", predicate, "--format", "json"]
         if signer:
             cmd += ["--signer-workflow", signer]
         proc = gh(*cmd, check=False)
+        ok = proc.returncode == 0
+        # gh attestation verify suppresses its human-readable summary when stdout
+        # is not a TTY (headless CI), leaving stdout+stderr empty on success — so
+        # capture --format json and distil it; on failure stderr carries the error.
+        output = _summarize_verify(proc.stdout) if ok else (proc.stdout + proc.stderr).strip()
         results.append(
             {
                 "predicate": predicate,
                 "signer": signer or f"repo:{repo}",
-                "ok": proc.returncode == 0,
-                "output": (proc.stdout + proc.stderr).strip(),
+                "ok": ok,
+                "output": output,
             }
         )
     return results
@@ -341,14 +380,16 @@ def render_pr_body(plugin_name: str, repo: str, old_ref: str, new_ref: str,
     # One re-verify command per predicate, carrying --signer-workflow for
     # seam-signed predicates so a reviewer reproduces exactly what was verified
     # (--repo alone is insufficient for seam-signed gates; org CLAUDE.md §5).
+    # --format json mirrors how the engine verifies, so the command produces
+    # evidence even in a non-TTY context (plain output is suppressed headless).
     if evidence["checks"]:
         reverify = "\n".join(
-            f"gh attestation verify {subject} --repo {repo} --predicate-type {c['predicate']}"
+            f"gh attestation verify {subject} --repo {repo} --predicate-type {c['predicate']} --format json"
             + ("" if c["signer"].startswith("repo:") else f" \\\n  --signer-workflow {c['signer']}")
             for c in evidence["checks"]
         )
     else:
-        reverify = f"gh attestation verify {subject} --repo {repo} --predicate-type <predicate>"
+        reverify = f"gh attestation verify {subject} --repo {repo} --predicate-type <predicate> --format json"
     return f"""\
 Automated, **verify-first** re-pin of an external plugin to its latest attested release.
 
