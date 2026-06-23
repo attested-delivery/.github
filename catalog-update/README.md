@@ -59,16 +59,12 @@ target's `catalog-admission` so the hub and the gate agree.
 
 ## Owner setup
 
-The hub reads the `attested-delivery-ci` App's **client id** from an **org variable**
-and its private key from an **org secret** (the client id is a public identifier, the
-key is not). `actions/create-github-app-token` takes `client-id` (the `app-id` input
-is deprecated). Scope both to the `.github` repo, where the hub runs:
+The hub authenticates as the `attested-delivery-ci` App. Its **client id** is a public
+identifier, so it is pinned directly in the workflow (like the action SHAs);
+`actions/create-github-app-token` takes `client-id` (the `app-id` input is deprecated).
+The only credential in org config is the **private key**, an org secret:
 
 ```bash
-# App client id (public identifier, e.g. Iv23li...) — org variable
-gh variable set CATALOG_UPDATER_APP_CLIENT_ID --org attested-delivery \
-  --visibility selected --repos .github --body "<CLIENT_ID>"
-
 # App private key — org secret (reads the .pem; value never printed)
 gh secret set CATALOG_UPDATER_APP_PRIVATE_KEY --org attested-delivery \
   --visibility selected --repos .github < ~/.secrets/attested-delivery-ci.pem
