@@ -94,6 +94,13 @@ jobs:
         run: cosign sign --yes "${IMAGE_REF}"
 
       # --- CycloneDX SBOM, attested as an OCI referrer ---
+      # upload-artifact/upload-release-assets disabled: the SBOM is already
+      # published as a cosign-attested OCI referrer below, and this job's
+      # `contents: read` permission can't satisfy the action's own default
+      # `upload-release-assets: true` (it tries to attach to a GitHub
+      # Release matching the tag name, which 403s as "Resource not
+      # accessible by integration") — mirrors the identical fix already
+      # applied to the binary-path `sbom` job in caller repos.
       - name: Generate CycloneDX SBOM
         if: ${{ inputs.sbom }}
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
@@ -101,6 +108,8 @@ jobs:
           image: ${{ env.IMAGE_REF }}
           format: cyclonedx-json
           output-file: sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
       - name: Attest SBOM (cosign)
         if: ${{ inputs.sbom }}
         run: |
