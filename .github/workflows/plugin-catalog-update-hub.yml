@@ -39,7 +39,7 @@ jobs:
       has-targets: ${{ steps.build.outputs.has-targets }}
     steps:
       - name: Checkout (.github — for the deny-list)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Mint installation token (enumerate accessible repos)
         id: token
@@ -116,14 +116,14 @@ jobs:
           repositories: ${{ matrix.name }}
 
       - name: Checkout target marketplace
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ matrix.repo }}
           token: ${{ steps.token.outputs.token }}
           fetch-depth: 0
 
       - name: Checkout updater action (.github)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: .updater
           sparse-checkout: .github/actions/plugin-catalog-update
